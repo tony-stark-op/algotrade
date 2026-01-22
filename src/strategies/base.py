@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import logging
+from pathlib import Path
 
 class Strategy(ABC):
     def __init__(self, config):
@@ -8,6 +9,52 @@ class Strategy(ABC):
         self.position = None # Current open position
         self.equity = config.get("initial_capital", 10000.0) # Tracked by engine usually, but local ref useful
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.state_file = Path(config.get("PATHS", {}).get("STATE_FILE", "trade_state.pkl"))
+
+    def save_state(self):
+        """Save critical state to file."""
+        import pickle
+        state = {
+            'orders': self.orders,
+            'position': self.position,
+            'equity': self.equity
+        }
+        # Allow child classes to add more state
+        state.update(self.get_additional_state())
+        
+        try:
+            with open(self.state_file, 'wb') as f:
+                pickle.dump(state, f)
+        except Exception as e:
+            self.logger.error(f"Failed to save state: {e}")
+
+    def load_state(self):
+        """Load state from file."""
+        import pickle
+        if not self.state_file.exists():
+            return False
+            
+        try:
+            with open(self.state_file, 'rb') as f:
+                state = pickle.load(f)
+            
+            self.orders = state.get('orders', [])
+            self.position = state.get('position')
+            self.equity = state.get('equity', self.equity)
+            self.set_additional_state(state)
+            self.logger.info("State loaded successfully.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load state: {e}")
+            return False
+
+    def get_additional_state(self):
+        """Override to save custom strategy state."""
+        return {}
+
+    def set_additional_state(self, state):
+        """Override to load custom strategy state."""
+        pass
 
     @abstractmethod
     def on_init(self):

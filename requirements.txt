@@ -1,5 +1,6 @@
 pandas
-numpy
-matplotlib
-pytz
 MetaTrader5
+pytz
+pyyaml
+streamlit
+cryptography

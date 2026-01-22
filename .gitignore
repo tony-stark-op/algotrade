@@ -10,3 +10,10 @@ breakout_equity.csv
 breakout_curve.png
 algotrade.log
 src/mt5_data/
+results/
+trade_state.pkl
+system.log
+*.log
+XAUUSD15.csv
+config.json
+dummy_data.csv

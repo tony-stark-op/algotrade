@@ -1,35 +1,52 @@
 from src.strategies.base import Strategy
+from src.production.config import config as global_config
 from datetime import datetime, time
 
 class GoldBreakout(Strategy):
     def on_init(self):
-        # Load Session Times
+        # 1. Load Session Times from YAML
         sessions = self.config.get("TRADING_SESSION", {})
         
-        # Parse times (Format "HH:MM")
-        self.asian_start = self._parse_time(sessions.get("ASIAN_START", "03:30"))
-        self.asian_end = self._parse_time(sessions.get("ASIAN_END", "13:30"))
-        self.trade_end = self._parse_time(sessions.get("TRADE_END", "21:30"))
+        # User Time -> Broker Time
+        self.asian_start = self._parse_and_convert(sessions.get("ASIAN_START", "03:30"))
+        self.asian_end = self._parse_and_convert(sessions.get("ASIAN_END", "13:30"))
+        self.trade_end = self._parse_and_convert(sessions.get("TRADE_END", "21:30"))
         
-        # Strategy Params
+        # 2. Strategy Params
         params = self.config.get("STRATEGY_PARAMS", {})
         self.tp_pips = params.get("TP_PIPS", 200)
         self.sl_pips = params.get("SL_PIPS", 100)
-        self.trail_trigger = params.get("TRAIL_TRIGGER_PIPS", 20)
-        self.trail_dist = params.get("TRAIL_DIST_PIPS", 5)
         
-        # PIP Value for Gold (0.10 price diff = 1 pip usually, but let's stick to original)
-        # Original: PIP_VAL_PRICE = 0.10
         self.PIP_VAL = 0.10
         
-        # State
+        # 3. State
         self.asian_high = -1.0
         self.asian_low = float('inf')
         self.range_set = False
+        
+        # 4. Load Persistence Check
+        # If user wants to resume, we assume we should load state
+        # In a real app we might have a flag 'RESUME_SESSION' in config
+        if global_config:  # Ensure we have access to global config helpers if needed
+             self.load_state()
 
-    def _parse_time(self, time_str):
+    def _parse_and_convert(self, time_str):
+        """Parse string "HH:MM" (User TZ) and convert to Broker TZ."""
         h, m = map(int, time_str.split(':'))
-        return time(h, m)
+        t = time(h, m)
+        
+        # If global config available, convert. Else raw time.
+        if global_config:
+            return global_config.convert_to_broker_time(t)
+        return t
+
+    def is_session_active(self, current_time, start_time, end_time):
+        """Check if current_time is within [start_time, end_time), handling midnight crossover."""
+        if start_time < end_time:
+            return start_time <= current_time < end_time
+        else:
+            # Midnight crossover (e.g. 23:00 to 02:00)
+            return current_time >= start_time or current_time < end_time
 
     def next(self, candle):
         t = candle['time'].time()
@@ -37,58 +54,72 @@ class GoldBreakout(Strategy):
         curr_low = candle['low']
         curr_close = candle['close']
         
-        # Session Logic
-        is_asian = (t >= self.asian_start) and (t < self.asian_end)
-        is_trade = (t >= self.asian_end) and (t < self.trade_end)
+        # Session Logic using helper
+        is_asian = self.is_session_active(t, self.asian_start, self.asian_end)
+        is_trade = self.is_session_active(t, self.asian_end, self.trade_end)
         
         # 1. Define Range during Asian Session
-        if t == self.asian_start:
-            self.asian_high = curr_high
-            self.asian_low = curr_low
-            self.range_set = True
-        elif is_asian:
+        # Special check: If we just started script mid-session, we might not have 'exact start'
+        # But for 'defining range', we usually want to track high/low continuously during Asian
+        if is_asian:
             self.asian_high = max(self.asian_high, curr_high)
             self.asian_low = min(self.asian_low, curr_low)
+            self.range_set = True
             
         # 2. Reset Range if day over (or specific end time)
-        if t >= self.trade_end:
-            self.range_set = False
+        # Simple check: If NOT asian and NOT trade, reset
+        # Or specifically if we pass trade_end.
+        # Let's say if we are past Trade End and not in Asian.
+        # But 'past' is tricky with midnight. 
+        # Safer: If neither session is active, reset.
+        if not is_asian and not is_trade and self.position is None:
+             self.range_set = False
+             self.asian_high = -1.0
+             self.asian_low = float('inf')
 
-        # 3. Entry Logic (Only if no position)
+        # 3. Entry Logic
         if self.position is None and is_trade and self.range_set:
             sl_dist_price = self.sl_pips * self.PIP_VAL
             tp_dist_price = self.tp_pips * self.PIP_VAL
             
             signal = None
-            if curr_close > self.asian_high:
-                # LONG Breakout
+            if curr_close > self.asian_high: # Long
                 entry_price = curr_close
                 sl_price = entry_price - sl_dist_price
                 tp_price = entry_price + tp_dist_price
                 signal = 'long'
                 
-            elif curr_close < self.asian_low:
-                # SHORT Breakout
+            elif curr_close < self.asian_low: # Short
                 entry_price = curr_close
                 sl_price = entry_price + sl_dist_price
                 tp_price = entry_price - tp_dist_price
                 signal = 'short'
                 
             if signal:
+                self.save_state() # Save before entry attempt
                 return self.signal_entry(signal, entry_price, sl_price, tp_price, comment="Breakout")
         
-        # 4. Exit / Management Logic (if position exists)
-        # handled by Engine usually, but if strategy has custom exit logic (like time exit)
-        # The engine will check SL/TP. Strategy checks Time Exit.
+        # 4. Exit / Time Exit
         if self.position:
-            if t >= self.trade_end:
+            # If trade session ended, close.
+            if not is_trade:
                  return self.signal_exit(curr_close, reason="Session Close")
-                 
-            # Trailing Stop Logic could be here or in Engine.
-            # Implemented in Engine in original, but better in Strategy if specific.
-            # Let's emit a 'MODIFY_SL' signal or handle in Engine.
-            # For simplicity, let's keep robust trailing in the Engine for now, 
-            # or if the user wants it here:
-            pass
-            
+        
+        # Periodically save state (e.g., every candle or on change)
+        # To avoid IO spam, maybe only when values change significantly?
+        # For safety, saving every step is okay for small scale.
+        # self.save_state() 
         return None
+
+    def get_additional_state(self):
+        return {
+            'asian_high': self.asian_high,
+            'asian_low': self.asian_low,
+            'range_set': self.range_set
+        }
+
+    def set_additional_state(self, state):
+        self.asian_high = state.get('asian_high', -1.0)
+        self.asian_low = state.get('asian_low', float('inf'))
+        self.range_set = state.get('range_set', False)
+
