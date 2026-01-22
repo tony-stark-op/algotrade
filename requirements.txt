@@ -2,5 +2,4 @@ pandas
 MetaTrader5
 pytz
 pyyaml
-streamlit
 cryptography
