@@ -3,8 +3,6 @@ import sys
 from src.config import config
 from src.etl.loader import get_data_loader
 from src.strategies.gold_breakout import GoldBreakout
-from src.backtesting.engine import BacktestEngine
-from src.backtesting.reporting import generate_report
 from src.production.trader import LiveTrader
 
 # Setup Logging
@@ -13,54 +11,31 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("algotrade.log")
+        logging.FileHandler("system.log")
     ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("Main")
 
 def main():
-    mode = config.get("MODE", "BACKTESTING").upper()
-    logger.info(f"Starting Application in {mode} mode.")
+    mode = config.get("MODE", "LIVE").upper()
+    logger.info(f"Initializing AlgoTrader in {mode} mode...")
     
-    try:
-        loader = get_data_loader()
-    except Exception as e:
-        logger.error(f"Failed to setup data loader: {e}")
+    if mode == "BACKTESTING":
+        logger.warning("Config is set to BACKTESTING.")
+        logger.warning("Please run the dedicated backtest script for simulation:")
+        logger.warning("  python3 run_gold_breakout.py")
         return
 
-    if mode == "BACKTESTING":
-        # 1. Load Data
-        start_date = datetime(2020, 1, 1) # Example default
-        end_date = datetime.now()
-        
-        # We need raw data. 
-        # If loader is MT5, it fetches. If CSV, it reads file.
-        # But `fetch_data` arguments might differ or CSV just loads all.
-        try:
-             # CSV Loader ignores start/end if not filtered strictly, or we pass None to load all
-             data = loader.fetch_data("XAUUSD", config.get("TIMEFRAME"), None, None)
-        except Exception as e:
-             logger.error(f"Data fetch failed: {e}")
-             return
-
-        if data.empty:
-            logger.error("No data found. Please check data source.")
-            return
-
-        # 2. Run Backtest
-        engine = BacktestEngine(GoldBreakout, data)
-        trades, equity = engine.run()
-        
-        # 3. Report
-        generate_report(trades, equity, engine.initial_capital)
-        
     elif mode == "LIVE":
-        trader = LiveTrader(GoldBreakout, loader)
-        trader.run()
+        try:
+            loader = get_data_loader()
+            trader = LiveTrader(GoldBreakout, loader)
+            trader.run()
+        except Exception as e:
+            logger.critical(f"Runtime Error: {e}", exc_info=True)
         
     else:
-        logger.error(f"Invalid MODE: {mode}")
+        logger.error(f"Invalid MODE configured: {mode}")
 
 if __name__ == "__main__":
-    from datetime import datetime
     main()
