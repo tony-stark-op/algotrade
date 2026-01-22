@@ -98,7 +98,6 @@ class LiveTrader:
                             'high': last_closed['high'],
                             'low': last_closed['low'],
                             'close': last_closed['close']
-                            'close': last_closed['close']
                         }
                         
                         # Log Current Price periodically (e.g. every 10s) to show life
