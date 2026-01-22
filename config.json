@@ -1,0 +1,20 @@
+{
+    "TIMEFRAME": "M15",
+    "MODE": "BACKTESTING",
+    "DATALOADING": "CUSTOM",
+    "DATA_FILE_PATH": "dummy_data.csv",
+    "RISK_MANAGEMENT": "DYNAMIC",
+    "RISK_PERCENTAGE": 1.0,
+    "FIXED_LOT_SIZE": 0.1,
+    "TRADING_SESSION": {
+        "ASIAN_START": "03:30",
+        "ASIAN_END": "13:30",
+        "TRADE_END": "21:30"
+    },
+    "STRATEGY_PARAMS": {
+        "TP_PIPS": 200,
+        "SL_PIPS": 100,
+        "TRAIL_TRIGGER_PIPS": 20,
+        "TRAIL_DIST_PIPS": 5
+    }
+}

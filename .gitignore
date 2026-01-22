@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.idea/
+.DS_Store
+venv/
+env/
+.env
+breakout_trades.csv
+breakout_equity.csv
+breakout_curve.png
+algotrade.log
+src/mt5_data/
